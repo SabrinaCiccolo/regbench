@@ -1,0 +1,8 @@
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# per-scan heatmaps written by `regbench inspection`
+results/regbench/figures/inspect/

@@ -1,0 +1,127 @@
+# regbench configuration. Paths are relative to the repository root.
+
+paths:
+  template: data/template/itodd_bracket_screw.ply  # template used by `regbench grid`
+  tables_dir: results/regbench/tables
+  figures_dir: results/regbench/figures
+  mvtec_root: data/mvtec3d
+  open3d_data: data/open3d                 # Open3D download cache (Stanford Bunny)
+  industrial_root: data/industrial         # inspection datasets, see build-industrial
+
+# ---- Preprocessing (template and every trial source) ------------------------
+# Statistical outlier removal, recenter to the centroid, d = AABB diagonal after
+# cleanup, voxel-downsample to d / voxel_divisor.
+preprocess:
+  outlier_nb_neighbors: 20
+  outlier_std_ratio: 2.0
+  voxel_divisor: 100          # --smoke uses 50
+
+# ---- Severity presets ----------------------------------------------------------
+# rot_max_deg: rotation angle upper bound, axis uniform on the sphere
+# trans_max_rel: translation magnitude upper bound, fraction of d
+# noise_rel: per-point Gaussian sigma, fraction of d
+# keep_frac: fraction of points kept after a random half-plane cut (1.0 = no cut)
+severities:
+  easy:   {rot_max_deg: 10,  trans_max_rel: 0.05, noise_rel: 0.001,  keep_frac: 1.00}
+  medium: {rot_max_deg: 45,  trans_max_rel: 0.25, noise_rel: 0.0025, keep_frac: 0.85}
+  hard:   {rot_max_deg: 180, trans_max_rel: 0.5,  noise_rel: 0.005,  keep_frac: 0.60}
+
+methods: [icp_pt2pt, icp_pt2pl, fpfh_ransac, fgr]   # keys of methods.METHODS
+
+n_trials: 50                  # per severity; all methods share each trial's source
+
+# Success := RRE < rre_deg AND RTE < rte_rel * d.
+thresholds:
+  rre_deg: 2.0
+  rte_rel: 0.01
+
+# ---- Registration parameters (multiples of the voxel size) -------------------
+registration:
+  icp_max_corr_mult: 2.0      # ICP max correspondence distance
+  normal_radius_mult: 2.0     # normal estimation radius
+  normal_max_nn: 30
+  fpfh_radius_mult: 5.0       # FPFH support radius
+  fpfh_max_nn: 100
+  ransac_dist_mult: 1.5       # RANSAC/FGR correspondence distance
+  ransac_n: 3
+
+# ---- sweep_symmetry.py: the grid on six ITODD parts, labeled by symmetry class --
+symmetry_sweep:
+  template_dir: data/template        # itodd_<part>.ply, from build-template itodd
+  n_trials: 20
+  parts:
+    bracket_screw: asymmetric
+    injection_pump: asymmetric
+    star: asymmetric
+    cylinder: axisymmetric
+    washer: axisymmetric
+    thread: axisymmetric
+
+# ---- clutter.py: target part plus n distractor parts in one source cloud -------
+# Only the target is perturbed by the known T_gt; distractors get their own random
+# pose and are placed offset_rel * d from the origin.
+clutter:
+  template_dir: data/template          # itodd_<part>.ply
+  target_part: bracket_screw
+  distractor_parts: [cylinder, injection_pump, star, thread, washer]
+  n_distractors: [0, 1, 2, 4]
+  severity: medium
+  n_trials: 30
+  offset_rel: [0.6, 1.3]
+  distractor_points: 3000              # points per distractor
+
+# ---- make_industrial.py: inspection datasets ----------------------------------
+# <industrial_root>/<part>/{train_good,test_good,test_defect}/*.ply, each with a
+# <stem>.gt.npz sidecar (defect labels; true pose for the synthetic parts).
+industrial:
+  synthetic:
+    parts:                    # part name -> template the scans are made from
+      synth_cable_gland: data/template/cable_gland.ply
+      synth_bunny: data/template/bunny.ply
+      synth_itodd_bracket_screw: data/template/itodd_bracket_screw.ply
+      synth_itodd_injection_pump: data/template/itodd_injection_pump.ply
+      synth_itodd_star: data/template/itodd_star.ply
+    n_train_good: 10          # 000.ply is the template itself at identity pose
+    n_test_good: 20
+    n_test_defect: 20
+    severity: medium          # cut/noise/pose preset for every scan
+    defect: {radius_rel: 0.10, amplitude_rel: 0.04, sign: 1}   # bump
+  mvtec:                      # MVTec 3D-AD scans converted to PLY
+    classes: [cable_gland, bagel, dowel, tire, potato]
+    defect_types:             # geometric defect types only
+      cable_gland: [bent, hole, thread]
+      bagel: [crack, hole]
+      dowel: [bent, cut]
+      tire: [cut, hole]
+      potato: [cut, hole]
+    n_train_good: 25          # test splits are used in full
+    plane_thresh_rel: 0.01    # same cleanup constants as make_template.py
+    dbscan_eps_rel: 0.02
+    dbscan_min_points: 30
+
+# ---- inspection.py: template-difference inspection ----------------------------
+inspect:
+  parts: [synth_cable_gland, synth_bunny, mvtec_cable_gland, mvtec_bagel,
+          mvtec_dowel, mvtec_tire, mvtec_potato,
+          synth_itodd_bracket_screw, synth_itodd_injection_pump, synth_itodd_star]
+  method: fpfh_ransac
+  template: train_good/000    # the train_good scan used as template
+  outlier_removal: false      # keeps test scans index-aligned with their sidecars
+  score_quantile: 0.995       # scan score = this quantile of point distances / d
+  tau_quantile: 0.999         # point threshold = this quantile of pooled good distances
+  heatmaps_per_part: 6        # per-scan heatmap PNGs (first N of each test split)
+
+# ---- propagation.py: false alarms vs alignment error ---------------------------
+propagation:
+  part: synth_cable_gland     # needs true poses (synthetic part)
+  rot_deg: [0, 0.25, 0.5, 1, 2, 4, 8, 16]        # rotation-only offsets
+  trans_rel: [0, 0.0025, 0.005, 0.01, 0.02, 0.04, 0.08]  # translation-only, x d
+  joint_rot_deg: [0, 1, 2, 4, 8]         # joint grid: rotation component
+  joint_trans_rel: [0, 0.005, 0.01, 0.02, 0.04]  # joint grid: translation component
+  repeats: 3                  # random axis/direction draws per magnitude
+  n_registered: 20            # scans registered by each method
+  tau_quantile: 0.999         # tau from true-pose-aligned good distances
+  exclusion_radius_mult: 1.5  # false positives counted outside mult x bump radius
+
+demo:
+  render_points: 30000        # max points per 3D heatmap panel

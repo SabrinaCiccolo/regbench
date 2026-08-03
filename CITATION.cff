@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "regbench"
+type: software
+authors:
+  - given-names: Sabrina
+    family-names: Ciccolo
+repository-code: "https://github.com/SabrinaCiccolo/regbench"
+license: MIT
